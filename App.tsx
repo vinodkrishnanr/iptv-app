@@ -17,6 +17,7 @@ import { VideoView, useVideoPlayer } from 'expo-video';
 import { xtream, setProxy, wrapProxy } from './src/xtream';
 import { saveCredentials, loadCredentials, clearCredentials, saveProxy, loadProxy } from './src/storage';
 import WebPlayer from './src/WebPlayer';
+import { matchesSearch } from './src/search';
 import type {
   XtreamCredentials,
   LoginResult,
