@@ -214,8 +214,86 @@ export const xtream = {
     return `${base}/movie/${creds.username}/${creds.password}/${streamId}.${ext || 'mp4'}`;
   },
 
+  // Browser-playable container extensions (in priority order).
+  // m3u8 (HLS) first since most IPTV servers transcode to HLS on request;
+  // then mp4, then ts, then webm.
+  BROWSER_EXTS: ['m3u8', 'mp4', 'ts', 'webm'] as string[],
+
+  // Non-browser formats that commonly cause DEMUXER_ERROR_COULD_NOT_PARSE.
+  NON_BROWSER_EXTS: ['mkv', 'avi', 'flv', 'wmv', 'mov', 'mpg', 'mpeg'] as string[],
+
+  // Build candidate URLs for a VOD stream trying multiple container extensions.
+  vodCandidates(creds: XtreamCredentials, streamId: number, ext: string): string[] {
+    const base = normalizeServer(creds.server);
+    const exts = new Set<string>();
+    // original first
+    if (ext) exts.add(ext);
+    // then browser-friendly
+    for (const e of this.BROWSER_EXTS) exts.add(e);
+    return [...exts].map((e) => `${base}/movie/${creds.username}/${creds.password}/${streamId}.${e}`);
+  },
+
+  // Probe candidate URLs and return the first that responds with a video content-type
+  // (or at least an OK status). Falls back to the original URL if none probe OK.
+  async getPlaybackUrl(creds: XtreamCredentials, streamId: number, ext: string): Promise<string> {
+    const candidates = this.vodCandidates(creds, streamId, ext);
+    if (Platform.OS !== 'web') return candidates[0];
+    for (const u of candidates) {
+      try {
+        // Use a range request to avoid downloading the whole file; some servers
+        // ignore HEAD, so GET with Range is more reliable.
+        const res = await fetch(u, { method: 'GET', headers: { Range: 'bytes=0-1023' } });
+        if (!res.ok && res.status !== 206) continue;
+        const ct = (res.headers.get('content-type') || '').toLowerCase();
+        // Accept if content-type looks like video or octet-stream; reject obvious HTML/error pages.
+        if (ct.includes('text/html') || ct.includes('application/json')) continue;
+        // Drain body to free connection.
+        try { await res.arrayBuffer(); } catch {}
+        return u;
+      } catch {
+        continue;
+      }
+    }
+    return candidates[0];
+  },
+
   seriesUrl(creds: XtreamCredentials, episodeId: string, ext: string): string {
     const base = normalizeServer(creds.server);
     return `${base}/series/${creds.username}/${creds.password}/${episodeId}.${ext || 'mp4'}`;
+  },
+
+  seriesCandidates(creds: XtreamCredentials, episodeId: string, ext: string): string[] {
+    const base = normalizeServer(creds.server);
+    const exts = new Set<string>();
+    if (ext) exts.add(ext);
+    for (const e of this.BROWSER_EXTS) exts.add(e);
+    return [...exts].map((e) => `${base}/series/${creds.username}/${creds.password}/${episodeId}.${e}`);
+  },
+
+  async getSeriesPlaybackUrl(creds: XtreamCredentials, episodeId: string, ext: string): Promise<string> {
+    const candidates = this.seriesCandidates(creds, episodeId, ext);
+    if (Platform.OS !== 'web') return candidates[0];
+    for (const u of candidates) {
+      try {
+        const res = await fetch(u, { method: 'GET', headers: { Range: 'bytes=0-1023' } });
+        if (!res.ok && res.status !== 206) continue;
+        const ct = (res.headers.get('content-type') || '').toLowerCase();
+        if (ct.includes('text/html') || ct.includes('application/json')) continue;
+        try { await res.arrayBuffer(); } catch {}
+        return u;
+      } catch {
+        continue;
+      }
+    }
+    return candidates[0];
+  },
+
+  // Live streams: try m3u8 first, then ts.
+  liveCandidates(creds: XtreamCredentials, streamId: number): string[] {
+    const base = normalizeServer(creds.server);
+    return [
+      `${base}/live/${creds.username}/${creds.password}/${streamId}.m3u8`,
+      `${base}/live/${creds.username}/${creds.password}/${streamId}.ts`,
+    ];
   },
 };

@@ -16,7 +16,7 @@ import { StatusBar } from 'expo-status-bar';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import { xtream, setProxy, wrapProxy } from './src/xtream';
 import { saveCredentials, loadCredentials, clearCredentials, saveProxy, loadProxy } from './src/storage';
-import { matchesSearch } from './src/search';
+import WebPlayer from './src/WebPlayer';
 import type {
   XtreamCredentials,
   LoginResult,
@@ -221,6 +221,7 @@ export default function App() {
           url={screen.url}
           title={screen.title}
           onBack={() => setScreen({ name: 'home' })}
+          creds={creds}
         />
       )}
     </View>
@@ -458,7 +459,10 @@ function VodScreen({
           renderItem={({ item }) => (
             <TouchableOpacity
               style={styles.streamCard}
-              onPress={() => onPlay(xtream.vodUrl(creds, item.stream_id, item.container_extension), item.name)}
+              onPress={async () => {
+                 const url = await xtream.getPlaybackUrl(creds, item.stream_id, item.container_extension);
+                 onPlay(url, item.name);
+               }}
             >
               {item.stream_icon ? (
                 <Image source={{ uri: item.stream_icon }} style={styles.streamIcon} />
@@ -642,9 +646,10 @@ function SeriesDetailScreen({
               <TouchableOpacity
                 key={ep.id}
                 style={styles.episodeRow}
-                onPress={() =>
-                  onPlay(xtream.seriesUrl(creds, ep.id, ep.container_extension), `${info.info?.name} - S${season}E${ep.episode_num}`)
-                }
+                onPress={async () => {
+                  const url = await xtream.getSeriesPlaybackUrl(creds, ep.id, ep.container_extension);
+                  onPlay(url, `${info.info?.name} - S${season}E${ep.episode_num}`)
+                }}
               >
                 <Text style={styles.text}>
                   E{ep.episode_num}: {ep.title}
@@ -659,7 +664,7 @@ function SeriesDetailScreen({
 }
 
 // ---------- Player ----------
-function PlayerScreen({ url, title, onBack }: { url: string; title: string; onBack: () => void }) {
+function PlayerScreen({ url, title, onBack, creds }: { url: string; title: string; onBack: () => void; creds: XtreamCredentials | null }) {
   const [status, setStatus] = useState<string>('loading');
   const [error, setError] = useState<string | null>(null);
   const [useProxy, setUseProxy] = useState(false);
@@ -685,12 +690,18 @@ function PlayerScreen({ url, title, onBack }: { url: string; title: string; onBa
         <Text style={styles.headerTitle} numberOfLines={1}>{title}</Text>
       </View>
       <View style={{ flex: 1, justifyContent: 'center', padding: 12 }}>
-        <VideoView
-          player={player}
-          style={styles.video}
-          contentFit="contain"
-          nativeControls
-        />
+        {Platform.OS === 'web' ? (
+          <View style={{ flex: 1 }}>
+            <WebPlayer url={playerUrl} onStatus={setStatus} onError={(e) => setError(e)} />
+          </View>
+        ) : (
+          <VideoView
+            player={player}
+            style={styles.video}
+            contentFit="contain"
+            nativeControls
+          />
+        )}
         <Text style={{ color: COLORS.muted, fontSize: 12, marginTop: 8 }}>Status: {status}</Text>
         {error ? <Text style={styles.error}>{error}</Text> : null}
         <Text style={{ color: COLORS.muted, fontSize: 11, marginTop: 8 }} numberOfLines={3}>{playerUrl}</Text>
@@ -702,13 +713,20 @@ function PlayerScreen({ url, title, onBack }: { url: string; title: string; onBa
               <Text style={styles.buttonText}>Open in new tab</Text>
             </TouchableOpacity>
           )}
+          {Platform.OS === 'web' && (
+            <TouchableOpacity style={styles.button} onPress={() => {
+              try { (navigator as any).clipboard?.writeText(playerUrl); } catch {}
+            }}>
+              <Text style={styles.buttonText}>Copy URL</Text>
+            </TouchableOpacity>
+          )}
           <TouchableOpacity style={styles.button} onPress={() => setUseProxy(!useProxy)}>
             <Text style={styles.buttonText}>{useProxy ? 'Use direct URL' : 'Retry with proxy'}</Text>
           </TouchableOpacity>
         </View>
         {Platform.OS === 'web' && (
           <Text style={styles.hint}>
-            If nothing plays: the file may be a format your browser can't play (e.g. mkv/avi). Try "Open in new tab" to test the URL directly.
+            On web, browsers only decode HLS (m3u8) and MP4 (H.264). MKV/AVI/HEVC won't play in-browser. The app tries m3u8/mp4/ts/webm variants. If it still fails: copy the URL and open in VLC, or run on Android (npm run android) where all formats play.
           </Text>
         )}
       </View>
