@@ -15,7 +15,8 @@ import {
 import { StatusBar } from 'expo-status-bar';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import { xtream, setProxy, wrapProxy } from './src/xtream';
-import { saveCredentials, loadCredentials, clearCredentials, saveProxy, loadProxy } from './src/storage';
+import { saveCredentials, loadCredentials, clearCredentials, saveProxy, loadProxy, loadPlayerPrefs, savePlayerPrefs, type PlayerPrefs, type PlayerPref } from './src/storage';
+import { Linking } from 'react-native';
 import WebPlayer from './src/WebPlayer';
 import { matchesSearch } from './src/search';
 import type {
@@ -45,6 +46,7 @@ export default function App() {
   const [loginResult, setLoginResult] = useState<LoginResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [playerPrefs, setPlayerPrefs] = useState<PlayerPrefs>({ live: 'internal', vod: 'internal', series: 'internal', externalPackage: '' });
 
   // login form
   const [server, setServer] = useState('');
@@ -56,6 +58,8 @@ export default function App() {
     (async () => {
       const c = await loadCredentials();
       const p = await loadProxy();
+      const pp = await loadPlayerPrefs();
+      setPlayerPrefs(pp);
       if (p) {
         setProxyState(p);
         setProxy(p);
@@ -114,6 +118,27 @@ export default function App() {
     setLoginResult(null);
     setScreen({ name: 'login' });
   }, []);
+
+  const playStream = useCallback(async (kind: 'live' | 'vod' | 'series', url: string, title: string) => {
+    const pref = kind === 'live' ? playerPrefs.live : kind === 'vod' ? playerPrefs.vod : playerPrefs.series;
+    if (pref === 'external') {
+      const pkg = playerPrefs.externalPackage?.trim();
+      try {
+        if (Platform.OS === 'android' && pkg) {
+          const intentUrl = `intent:${url}#Intent;action=android.intent.action.VIEW;type=video/*;package=${pkg};end`;
+          await Linking.openURL(intentUrl);
+        } else if (Platform.OS === 'web') {
+          try { window.open(url, '_blank'); } catch {}
+        } else {
+          await Linking.openURL(url);
+        }
+      } catch (e: any) {
+        Alert.alert('External player failed', e?.message || 'Could not open external player');
+      }
+      return;
+    }
+    setScreen({ name: 'player', url, title });
+  }, [playerPrefs]);
 
   if (screen.name === 'login') {
     return (
@@ -190,7 +215,7 @@ export default function App() {
           creds={creds}
           categoryId={screen.categoryId}
           onBack={() => setScreen({ name: 'home' })}
-          onPlay={(url, title) => setScreen({ name: 'player', url, title })}
+          onPlay={(url, title) => playStream('live', url, title)}
         />
       )}
       {screen.name === 'vod' && (
@@ -198,7 +223,7 @@ export default function App() {
           creds={creds}
           categoryId={screen.categoryId}
           onBack={() => setScreen({ name: 'home' })}
-          onPlay={(url, title) => setScreen({ name: 'player', url, title })}
+          onPlay={(url, title) => playStream('vod', url, title)}
         />
       )}
       {screen.name === 'series' && (
@@ -214,7 +239,7 @@ export default function App() {
           creds={creds}
           seriesId={screen.seriesId}
           onBack={() => setScreen({ name: 'series' })}
-          onPlay={(url, title) => setScreen({ name: 'player', url, title })}
+          onPlay={(url, title) => playStream('series', url, title)}
         />
       )}
       {screen.name === 'player' && (
@@ -223,6 +248,13 @@ export default function App() {
           title={screen.title}
           onBack={() => setScreen({ name: 'home' })}
           creds={creds}
+        />
+      )}
+      {screen.name === 'settings' && (
+        <SettingsScreen
+          prefs={playerPrefs}
+          onSave={async (p) => { setPlayerPrefs(p); await savePlayerPrefs(p); }}
+          onBack={() => setScreen({ name: 'home' })}
         />
       )}
     </View>
@@ -268,6 +300,9 @@ function HomeScreen({
         </TouchableOpacity>
         <TouchableOpacity style={styles.tile} onPress={() => onNavigate({ name: 'series' })}>
           <Text style={styles.tileText}>🎞️ Series</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.tile} onPress={() => onNavigate({ name: 'settings' })}>
+          <Text style={styles.tileText}>⚙️ Settings</Text>
         </TouchableOpacity>
       </View>
     </ScrollView>
@@ -732,6 +767,86 @@ function PlayerScreen({ url, title, onBack, creds }: { url: string; title: strin
         )}
       </View>
     </View>
+  );
+}
+
+// ---------- Settings ----------
+function SettingsScreen({
+  prefs,
+  onSave,
+  onBack,
+}: {
+  prefs: PlayerPrefs;
+  onSave: (p: PlayerPrefs) => Promise<void>;
+  onBack: () => void;
+}) {
+  const [live, setLive] = useState<PlayerPref>(prefs.live);
+  const [vod, setVod] = useState<PlayerPref>(prefs.vod);
+  const [series, setSeries] = useState<PlayerPref>(prefs.series);
+  const [pkg, setPkg] = useState(prefs.externalPackage || '');
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    setSaving(true);
+    await onSave({ live, vod, series, externalPackage: pkg.trim() });
+    setSaving(false);
+    onBack();
+  };
+
+  const Row = ({ label, value, onChange }: { label: string; value: PlayerPref; onChange: (v: PlayerPref) => void }) => (
+    <View style={{ marginBottom: 16 }}>
+      <Text style={styles.cardTitle}>{label}</Text>
+      <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+        <TouchableOpacity
+          style={[styles.catChip, value === 'internal' && styles.catChipActive]}
+          onPress={() => onChange('internal')}
+        >
+          <Text style={styles.catChipText}>Internal player</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.catChip, value === 'external' && styles.catChipActive]}
+          onPress={() => onChange('external')}
+        >
+          <Text style={styles.catChipText}>External player</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+
+  return (
+    <ScrollView style={styles.container} contentContainerStyle={{ padding: 16 }}>
+      <View style={styles.topBar}>
+        <TouchableOpacity onPress={onBack}><Text style={styles.link}>← Back</Text></TouchableOpacity>
+        <Text style={styles.headerTitle}>Settings</Text>
+      </View>
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Default player per category</Text>
+        <Text style={styles.text}>Choose whether each category plays in the built-in player or an external app (e.g. VLC).</Text>
+      </View>
+      <Row label="Live TV" value={live} onChange={setLive} />
+      <Row label="Movies (VOD)" value={vod} onChange={setVod} />
+      <Row label="Series" value={series} onChange={setSeries} />
+
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>External player app (Android)</Text>
+        <Text style={styles.text}>Optional package name, e.g. org.videolan.vlc. Leave empty to use the system "Open with" chooser.</Text>
+        <TextInput
+          style={[styles.input, { marginTop: 8 }]}
+          placeholder="org.videolan.vlc"
+          placeholderTextColor={COLORS.muted}
+          value={pkg}
+          onChangeText={setPkg}
+          autoCapitalize="none"
+        />
+        {Platform.OS === 'web' && (
+          <Text style={styles.hint}>On web, external play opens the stream URL in a new tab.</Text>
+        )}
+      </View>
+
+      <TouchableOpacity style={styles.button} onPress={save} disabled={saving}>
+        {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Save</Text>}
+      </TouchableOpacity>
+    </ScrollView>
   );
 }
 

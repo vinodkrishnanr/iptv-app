@@ -3,6 +3,7 @@ import type { XtreamCredentials } from './types';
 
 const KEY_CREDS = 'iptv_creds';
 const KEY_PROXY = 'iptv_proxy';
+const KEY_PLAYER_PREFS = 'iptv_player_prefs';
 
 export async function saveCredentials(creds: XtreamCredentials): Promise<void> {
   await AsyncStorage.setItem(KEY_CREDS, JSON.stringify(creds));
@@ -29,4 +30,34 @@ export async function saveProxy(url: string | null): Promise<void> {
 
 export async function loadProxy(): Promise<string | null> {
   return AsyncStorage.getItem(KEY_PROXY);
+}
+
+export type PlayerPref = 'internal' | 'external';
+
+export type PlayerPrefs = {
+  live: PlayerPref;
+  vod: PlayerPref;
+  series: PlayerPref;
+  externalPackage: string; // android package name for external player (optional)
+};
+
+const DEFAULT_PREFS: PlayerPrefs = {
+  live: 'internal',
+  vod: 'internal',
+  series: 'internal',
+  externalPackage: '',
+};
+
+export async function loadPlayerPrefs(): Promise<PlayerPrefs> {
+  const raw = await AsyncStorage.getItem(KEY_PLAYER_PREFS);
+  if (!raw) return { ...DEFAULT_PREFS };
+  try {
+    return { ...DEFAULT_PREFS, ...(JSON.parse(raw) as Partial<PlayerPrefs>) };
+  } catch {
+    return { ...DEFAULT_PREFS };
+  }
+}
+
+export async function savePlayerPrefs(p: PlayerPrefs): Promise<void> {
+  await AsyncStorage.setItem(KEY_PLAYER_PREFS, JSON.stringify(p));
 }

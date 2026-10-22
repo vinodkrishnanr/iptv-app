@@ -147,4 +147,5 @@ export type Screen =
   | { name: 'vod'; categoryId?: string }
   | { name: 'series'; categoryId?: string }
   | { name: 'seriesDetail'; seriesId: number }
-  | { name: 'player'; url: string; title: string };
+  | { name: 'player'; url: string; title: string }
+  | { name: 'settings' };
