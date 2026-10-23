@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   StyleSheet,
   Text,
@@ -327,7 +327,15 @@ function LiveScreen({
   const [error, setError] = useState<string | null>(null);
   const [selectedCat, setSelectedCat] = useState<string | undefined>(categoryId);
   const [query, setQuery] = useState('');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
   const [exact, setExact] = useState(false);
+
+  // Debounce search so filtering (regex over thousands of streams) runs after
+  // typing pauses instead of on every keystroke — keeps the UI responsive.
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQuery(query), 200);
+    return () => clearTimeout(t);
+  }, [query]);
 
   useEffect(() => {
     (async () => {
@@ -347,7 +355,7 @@ function LiveScreen({
   }, [creds, selectedCat]);
 
   const loadCat = (id?: string) => setSelectedCat(id);
-  const filtered = streams.filter((s) => matchesSearch(s.name, query, exact));
+  const filtered = useMemo(() => streams.filter((s) => matchesSearch(s.name, debouncedQuery, exact)), [streams, debouncedQuery, exact]);
 
   return (
     <View style={styles.container}>
@@ -429,7 +437,13 @@ function VodScreen({
   const [error, setError] = useState<string | null>(null);
   const [selectedCat, setSelectedCat] = useState<string | undefined>(categoryId);
   const [query, setQuery] = useState('');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
   const [exact, setExact] = useState(false);
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQuery(query), 200);
+    return () => clearTimeout(t);
+  }, [query]);
 
   useEffect(() => {
     (async () => {
@@ -447,7 +461,7 @@ function VodScreen({
       }
     })();
   }, [creds, selectedCat]);
-  const filtered = streams.filter((s) => matchesSearch(s.name, query, exact));
+  const filtered = useMemo(() => streams.filter((s) => matchesSearch(s.name, debouncedQuery, exact)), [streams, debouncedQuery, exact]);
 
   return (
     <View style={styles.container}>
@@ -496,8 +510,7 @@ function VodScreen({
             <TouchableOpacity
               style={styles.streamCard}
               onPress={async () => {
-                 const url = await xtream.getPlaybackUrl(creds, item.stream_id, item.container_extension);
-                 onPlay(url, item.name);
+                 if (Platform.OS !== 'web') { onPlay(xtream.vodUrl(creds, item.stream_id, item.container_extension), item.name); return; } xtream.getPlaybackUrl(creds, item.stream_id, item.container_extension).then((url) => onPlay(url, item.name));
                }}
             >
               {item.stream_icon ? (
@@ -533,7 +546,13 @@ function SeriesScreen({
   const [error, setError] = useState<string | null>(null);
   const [selectedCat, setSelectedCat] = useState<string | undefined>(categoryId);
   const [query, setQuery] = useState('');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
   const [exact, setExact] = useState(false);
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQuery(query), 200);
+    return () => clearTimeout(t);
+  }, [query]);
 
   useEffect(() => {
     (async () => {
@@ -551,7 +570,7 @@ function SeriesScreen({
       }
     })();
   }, [creds, selectedCat]);
-  const filtered = series.filter((s) => matchesSearch(s.name, query, exact));
+  const filtered = useMemo(() => series.filter((s) => matchesSearch(s.name, debouncedQuery, exact)), [series, debouncedQuery, exact]);
 
   return (
     <View style={styles.container}>
@@ -628,7 +647,13 @@ function SeriesDetailScreen({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
   const [exact, setExact] = useState(false);
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQuery(query), 200);
+    return () => clearTimeout(t);
+  }, [query]);
 
   useEffect(() => {
     (async () => {
@@ -672,9 +697,9 @@ function SeriesDetailScreen({
       </View>
       {Object.keys(episodesBySeason).map((season) => {
         const eps = (episodesBySeason[season] || []).filter((ep: Episode) =>
-          matchesSearch(`${ep.title} E${ep.episode_num}`, query, exact)
+          matchesSearch(`${ep.title} E${ep.episode_num}`, debouncedQuery, exact)
         );
-        if (eps.length === 0 && query.trim()) return null;
+        if (eps.length === 0 && debouncedQuery.trim()) return null;
         return (
           <View key={season} style={{ marginTop: 12 }}>
             <Text style={styles.sectionTitle}>Season {season}</Text>
@@ -683,8 +708,8 @@ function SeriesDetailScreen({
                 key={ep.id}
                 style={styles.episodeRow}
                 onPress={async () => {
-                  const url = await xtream.getSeriesPlaybackUrl(creds, ep.id, ep.container_extension);
-                  onPlay(url, `${info.info?.name} - S${season}E${ep.episode_num}`)
+                  if (Platform.OS !== 'web') { onPlay(xtream.seriesUrl(creds, ep.id, ep.container_extension), `${info.info?.name} - S${season}E${ep.episode_num}`); return; }
+                  xtream.getSeriesPlaybackUrl(creds, ep.id, ep.container_extension).then((url) => onPlay(url, `${info.info?.name} - S${season}E${ep.episode_num}`));
                 }}
               >
                 <Text style={styles.text}>
